@@ -30,7 +30,7 @@ env/
 Thumbs.db
 
 # Generated plots and outputs
-*.png
+#*.png
 *.jpg
 *.jpeg
 *.pdf
