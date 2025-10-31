@@ -35,6 +35,40 @@ Hands-on exploration of Extropic's thermodynamic computing library and probabili
 - ✅ Build intuition for energy-based models
 - ✅ Classic statistical physics meets modern ML
 
+**🔬 Benchmark Results**:
+
+We ran comprehensive performance tests comparing THRML (GPU/CPU) against naive Python implementations. Here's what we found:
+
+| Grid Size | Naive Python | THRML CPU | THRML GPU | Winner |
+|-----------|--------------|-----------|-----------|---------|
+| 8×8 | **3823 s/s** | 662 s/s | 193 s/s | Naive (overhead dominates) |
+| 16×16 | **1003 s/s** | 685 s/s | 178 s/s | Naive (still too small) |
+| **32×32** | 241 s/s | **665 s/s** | 187 s/s | **THRML wins! ✨** |
+| 64×64 | 60 s/s | **564 s/s** | 218 s/s | THRML (9.4x faster) |
+| 128×128 | 15 s/s | **400 s/s** | 188 s/s | THRML (27x faster) |
+
+**Key Findings**:
+- 📍 **Crossover point: ~500 spins** (between 16×16 and 32×32)
+- 🐌 Below this: naive Python wins due to JAX/GPU overhead
+- 🚀 Above this: THRML's vectorization dominates (scales much better)
+- 🤔 GPU surprisingly slower than CPU for these sizes (memory transfer overhead)
+- 💡 Extropic's 10,000x claims target problems with **millions** of variables, not hundreds
+
+![Benchmark Results](./01_ising_phase_transitions/sampling_benchmark.png)
+
+**Try it yourself**:
+```bash
+cd 01_ising_phase_transitions
+python benchmark.py
+```
+
+**Challenge**: Can you find ways to make THRML faster? Ideas:
+- Better JIT warmup strategies
+- Optimize batch sizes
+- Test larger grids (256×256, 512×512)
+- Try different blocking strategies
+- Profile memory vs compute bottlenecks
+
 ---
 
 ### 2. Energy-Based Generative Model on MNIST 🎨
