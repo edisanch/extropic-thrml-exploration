@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated plots and outputs
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.svg
+
+# JAX cache
+.jax_cache/
+
+# Temporary files
+*.tmp
+*.log
+.cache/
+
+# Gradio temporary files
+gradio_cached_examples/
+flagged/
