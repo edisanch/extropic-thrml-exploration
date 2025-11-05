@@ -39,6 +39,11 @@ Thumbs.db
 # JAX cache
 .jax_cache/
 
+# MNIST Data
+**/data/
+**/preprocessed_cache/
+*.npy
+
 # Temporary files
 *.tmp
 *.log
