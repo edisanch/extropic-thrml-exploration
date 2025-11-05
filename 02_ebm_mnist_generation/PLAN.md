@@ -63,55 +63,135 @@ Build an Energy-Based Model (EBM) that generates MNIST digit images using THRML'
 
 ---
 
-## Phase 3: Training the EBM
+## Phase 3: Training the EBM ✅ COMPLETE
 
-### Step 3.1: Training Algorithm Implementation
+### Step 3.1: Training Algorithm Implementation ✅
 **File**: `train_ebm.py`
-- Implement Contrastive Divergence (CD-k) or Persistent CD
-- Positive phase: compute gradient on real data
-- Negative phase: sample from model, compute gradient
-- Parameter updates with optimizer (Adam/SGD)
+- ✅ Implement Contrastive Divergence (CD-1)
+- ✅ Positive phase: compute gradient on real data
+- ✅ Negative phase: sample from model, compute gradient
+- ✅ Parameter updates with Adam optimizer
+- ✅ Gradient clipping for stability
+- ✅ Training on single digit (3) for focused learning
+- ✅ Checkpoint saving every N epochs
 
-**Choices**:
-- CD-1 vs CD-10 (k steps between gradient updates)
-- Learning rate schedule
-- Batch size (balance speed vs stability)
+**Deliverable**: Training loop with CD-1 gradient computation
+**Note**: Used random negatives instead of Gibbs sampling for speed (requires Phase 4 optimization)
 
-**Deliverable**: Training loop with gradient computation
+### Step 3.2: Training Monitoring ✅
+**File**: `train_ebm_monitored.py`
+- ✅ TensorBoard integration with SummaryWriter
+- ✅ Scalar logging: loss, energies (data/samples), gradients, learning rate
+- ✅ Histogram logging: energy distributions, parameter distributions
+- ✅ Image logging: real data samples, generated samples per epoch
+- ✅ Text logging: model architecture, training configuration
+- ✅ Real-time monitoring during training
+- ✅ Per-epoch sample generation and visualization
+- ✅ Checkpoint saving with epoch tracking
 
-### Step 3.2: Training Monitoring
-**File**: `train_ebm.py` (continued)
-- Log energy values (real data vs samples)
-- Track reconstruction error
-- Visualize samples during training
-- Save checkpoints every N epochs
-
-**Deliverable**: Training with TensorBoard/logging
-
-### Step 3.3: Hyperparameter Tuning
-- Experiment with:
-  - Learning rates (1e-3, 1e-4, 1e-5)
-  - CD steps (1, 5, 10)
-  - Batch sizes (32, 64, 128)
-  - Initialization strategies
-- Select best configuration
-
-**Deliverable**: Trained EBM with tuned hyperparameters
+**Deliverable**: Comprehensive TensorBoard monitoring system
+**Achievement**: Energy gap of 454+ showing strong discrimination learning
 
 ---
 
-## Phase 4: Sampling & Generation
+## Phase 4: Optimization & Performance
 
-### Step 4.1: THRML Block Gibbs Sampling
+### Step 4.1: JIT Compilation of Gibbs Sampling
+**File**: `thrml_sampler.py` (optimization)
+- JIT compile conditional probability computation with `@jax.jit`
+- JIT compile full Gibbs step function
+- Minimize Python loops, maximize JAX operations
+- Benchmark compilation overhead vs runtime gains
+
+**Deliverable**: 10-100x faster Gibbs sampling
+
+### Step 4.2: GPU Acceleration
+**File**: `thrml_sampler.py` + training scripts
+- Move all JAX operations to GPU
+- Batch sampling operations for GPU parallelism
+- Use `vmap` for vectorized batch sampling
+- Profile GPU utilization and memory usage
+- Optimize memory transfers CPU↔GPU
+
+**Deliverable**: GPU-accelerated sampling and training
+
+### Step 4.3: Vectorized Operations
+**File**: `thrml_sampler.py` (continued)
+- Replace remaining Python loops with JAX operations
+- Vectorize neighbor lookups
+- Batch conditional probability computations
+- Use JAX's parallel primitives (`pmap`, `vmap`)
+
+**Deliverable**: Fully vectorized, production-ready sampler
+
+### Step 4.4: Performance Validation
+**File**: `benchmark_optimized.py`
+- Measure end-to-end training time with optimizations
+- Compare: unoptimized vs JIT vs GPU vs fully optimized
+- Profile bottlenecks (sampling, energy computation, gradients)
+- Document speedup factors at each stage
+- Verify numerical accuracy maintained
+
+**Deliverable**: Performance benchmarks showing optimization impact
+
+**Success Criteria**: 
+- Gibbs sampling < 1ms per sample (from ~20ms)
+- Can train with `use_gibbs_in_training=True` in reasonable time
+- GPU utilization > 80% during sampling
+- Can generate high-quality samples efficiently
+
+---
+
+## Phase 5: Hyperparameter Tuning & Final Training
+
+**Prerequisites**: Phase 4 optimizations MUST be complete first
+
+### Step 5.1: Proper CD-1 Training
+**File**: `train_ebm_optimized.py`
+- Retrain with `use_gibbs_in_training=True` (now fast!)
+- Train on single digit with proper Gibbs negatives
+- Train longer (50-100 epochs)
+- Monitor convergence carefully
+
+**Deliverable**: Model trained with true CD-1 (not random negatives)
+
+### Step 5.2: Hyperparameter Exploration
+**File**: `hyperparameter_search.py`
+- Experiment with:
+  - Learning rates (1e-3, 1e-4, 1e-5)
+  - CD steps (1, 5, 10)
+  - Batch sizes (32, 64, 128, 256)
+  - Number of Gibbs steps (1, 5, 10)
+  - Initialization strategies
+- Use TensorBoard to compare runs
+- Select best configuration
+
+**Deliverable**: Optimal hyperparameters identified
+
+### Step 5.3: Multi-Digit Training
+**File**: `train_all_digits.py`
+- Train separate models for each digit (0-9)
+- Or train single model on all digits
+- Compare single-digit vs multi-digit performance
+- Evaluate sample quality per digit
+
+**Deliverable**: Trained models for all MNIST digits
+
+---
+
+## Phase 6: Sampling & Generation
+
+### Step 6.1: High-Quality Sample Generation
 **File**: `sample_thrml.py`
-- Initialize from random noise
-- Run block Gibbs with warmup + collection phases
+- Generate samples with optimized sampler
+- Use sufficient warmup steps for convergence
 - Vary sampling schedules (warmup steps, samples between)
-- Generate large batches of samples
+- Generate large batches efficiently
+- Per-digit conditional sampling
 
-**Deliverable**: Generated digit samples via THRML
+**Deliverable**: High-quality generated digit samples
 
-### Step 4.2: Naive Baseline Sampler
+### Step 6.2: Naive Baseline Sampler
 **File**: `sample_naive.py`
 - Implement sequential single-pixel Gibbs
 - No blocking, pure Python loops
@@ -119,20 +199,21 @@ Build an Energy-Based Model (EBM) that generates MNIST digit images using THRML'
 
 **Deliverable**: Baseline for speed comparison
 
-### Step 4.3: Quality Assessment
+### Step 6.3: Quality Assessment
 **File**: `evaluate_quality.py`
 - Visual inspection (grid of samples)
 - Per-digit class sampling (can we get all 0-9?)
 - Diversity metrics (are samples varied?)
+- Inception Score / FID if possible
 - Human evaluation protocol
 
 **Deliverable**: Quality analysis of generated digits
 
 ---
 
-## Phase 5: Benchmarking & Comparison
+## Phase 7: Benchmarking & Comparison
 
-### Step 5.1: Speed Benchmarks
+### Step 7.1: Speed Benchmarks
 **File**: `benchmark_sampling.py`
 - Measure samples/second for:
   - THRML block Gibbs (GPU)
@@ -143,7 +224,7 @@ Build an Energy-Based Model (EBM) that generates MNIST digit images using THRML'
 
 **Deliverable**: Sampling speed comparison charts
 
-### Step 5.2: VAE Baseline (Optional)
+### Step 7.2: VAE Baseline (Optional)
 **File**: `baseline_vae.py`
 - Train simple VAE on MNIST
 - Measure:
@@ -154,7 +235,7 @@ Build an Energy-Based Model (EBM) that generates MNIST digit images using THRML'
 
 **Deliverable**: VAE comparison for context
 
-### Step 5.3: Convergence Analysis
+### Step 7.3: Convergence Analysis
 **File**: `convergence_analysis.py`
 - Measure steps to coherent digit:
   - Energy trajectory (noise → low energy)
@@ -164,7 +245,7 @@ Build an Energy-Based Model (EBM) that generates MNIST digit images using THRML'
 
 **Deliverable**: Convergence metrics and plots
 
-### Step 5.4: Energy Efficiency Estimate
+### Step 7.4: Energy Efficiency Estimate
 **File**: `energy_analysis.py`
 - Estimate compute operations:
   - FLOPs per Gibbs step
@@ -177,9 +258,9 @@ Build an Energy-Based Model (EBM) that generates MNIST digit images using THRML'
 
 ---
 
-## Phase 6: Visualization & Analysis
+## Phase 8: Visualization & Analysis
 
-### Step 6.1: Energy Landscape Explorer
+### Step 8.1: Energy Landscape Explorer
 **File**: `visualize_energy.py`
 - Sample grid of images
 - Plot energy values as heatmap
@@ -188,7 +269,7 @@ Build an Energy-Based Model (EBM) that generates MNIST digit images using THRML'
 
 **Deliverable**: Energy landscape visualizations
 
-### Step 6.2: Sampling Dynamics Animation
+### Step 8.2: Sampling Dynamics Animation
 **File**: `animate_sampling.py`
 - Record Gibbs sampling steps
 - Create animation: noise → digit
@@ -197,7 +278,7 @@ Build an Energy-Based Model (EBM) that generates MNIST digit images using THRML'
 
 **Deliverable**: Animated sampling process
 
-### Step 6.3: Block Strategy Comparison
+### Step 8.3: Block Strategy Comparison
 **File**: `compare_blocking.py`
 - Compare 2-coloring vs 4-coloring
 - Measure convergence speed
@@ -208,9 +289,9 @@ Build an Energy-Based Model (EBM) that generates MNIST digit images using THRML'
 
 ---
 
-## Phase 7: Documentation & Findings
+## Phase 9: Documentation & Findings
 
-### Step 7.1: Results Summary
+### Step 9.1: Results Summary
 **File**: `RESULTS.md`
 - Summarize all findings
 - Include plots and metrics
@@ -219,7 +300,7 @@ Build an Energy-Based Model (EBM) that generates MNIST digit images using THRML'
 
 **Deliverable**: Comprehensive results document
 
-### Step 7.2: Code Documentation
+### Step 9.2: Code Documentation
 - Add docstrings to all functions
 - Create README for directory
 - Usage examples for each script
@@ -227,7 +308,7 @@ Build an Energy-Based Model (EBM) that generates MNIST digit images using THRML'
 
 **Deliverable**: Well-documented codebase
 
-### Step 7.3: Update Main README
+### Step 9.3: Update Main README
 **File**: `../README.md`
 - Mark project as complete
 - Add key findings summary
@@ -246,18 +327,25 @@ Build an Energy-Based Model (EBM) that generates MNIST digit images using THRML'
 3. **Day 3-4**: Phase 2.1-2.2 (EBM design)
 4. **Day 5-7**: Phase 2.3 (THRML integration)
 
-### Week 2: Training
-5. **Day 8-10**: Phase 3.1-3.2 (Training implementation)
-6. **Day 11-14**: Phase 3.3 (Hyperparameter tuning + training)
+### Week 2: Training & Monitoring
+5. ✅ **Day 8-10**: Phase 3.1 (CD-1 training implementation)
+6. ✅ **Day 11-14**: Phase 3.2 (TensorBoard monitoring)
 
-### Week 3: Sampling & Benchmarking
-7. **Day 15-16**: Phase 4.1-4.2 (Sampling implementations)
-8. **Day 17-18**: Phase 4.3 (Quality assessment)
-9. **Day 19-21**: Phase 5 (All benchmarks)
+### Week 3: Optimization
+7. **Day 15-17**: Phase 4.1-4.2 (JIT compilation + GPU acceleration)
+8. **Day 18-19**: Phase 4.3 (Vectorization)
+9. **Day 20-21**: Phase 4.4 (Performance validation)
 
-### Week 4: Polish & Documentation
-10. **Day 22-24**: Phase 6 (Visualizations)
-11. **Day 25-28**: Phase 7 (Documentation)
+### Week 4: Tuning & Sampling
+10. **Day 22-24**: Phase 5 (Hyperparameter tuning + proper CD-1)
+11. **Day 25-28**: Phase 6 (High-quality sampling + baselines)
+
+### Week 5: Benchmarking & Visualization  
+12. **Day 29-32**: Phase 7 (Speed benchmarks + convergence analysis)
+13. **Day 33-35**: Phase 8 (Energy landscapes + animations)
+
+### Week 6: Documentation
+14. **Day 36-42**: Phase 9 (Results summary + documentation)
 
 ---
 
@@ -398,6 +486,13 @@ Build an Energy-Based Model (EBM) that generates MNIST digit images using THRML'
 
 ---
 
-**Status**: 📋 Planning Complete - Ready to Begin Implementation  
-**Next Step**: Phase 1.1 - Data Exploration  
-**Updated**: November 4, 2025
+**Status**: 
+- ✅ Phase 1: Data Preparation - COMPLETE
+- ✅ Phase 2: EBM Architecture - COMPLETE  
+- ✅ Phase 3: Training & Monitoring - COMPLETE
+- 🔄 Phase 4: Optimization - NEXT (CRITICAL PATH)
+- ⏳ Phase 5-9: Pending (require Phase 4 completion)
+
+**Current Blocker**: Gibbs sampling performance (~20ms/sample)  
+**Next Critical Step**: Phase 4 - JIT compilation + GPU acceleration  
+**Updated**: November 5, 2025
