@@ -5,55 +5,59 @@ Build an Energy-Based Model (EBM) that generates MNIST digit images using THRML'
 
 ---
 
-## Phase 1: Data Preparation & Understanding
+## Phase 1: Data Preparation & Understanding ✅ COMPLETE
 
-### Step 1.1: Download & Explore MNIST
+### Step 1.1: Download & Explore MNIST ✅
 **File**: `data_exploration.py`
-- Download MNIST dataset (60k train, 10k test)
-- Visualize sample digits
-- Analyze pixel value distributions
-- Decide on discretization strategy (binary, 4-level, or 16-level)
+- ✅ Download MNIST dataset (60k train, 10k test)
+- ✅ Visualize sample digits
+- ✅ Analyze pixel value distributions
+- ✅ Decide on discretization strategy (binary, 4-level, or 16-level)
 
 **Deliverable**: Understanding of data characteristics, discretization choice
+**Decision**: 4-level discretization chosen for balance of detail and complexity
 
-### Step 1.2: Preprocessing Pipeline
-**File**: `preprocessing.py`
-- Implement discretization function (continuous → discrete pixels)
-- Create train/validation splits
-- Prepare data loaders for training
-- Cache preprocessed data
+### Step 1.2: Preprocessing Pipeline ✅
+**File**: `preprocessing.py` + `create_cache.py`
+- ✅ Implement discretization function (continuous → discrete pixels)
+- ✅ Create train/validation splits
+- ✅ Prepare data loaders for training
+- ✅ Cache preprocessed data (418.7 MB cache)
 
 **Deliverable**: Clean, discretized MNIST ready for EBM training
 
 ---
 
-## Phase 2: EBM Architecture Design
+## Phase 2: EBM Architecture Design ✅ COMPLETE
 
-### Step 2.1: Define Energy Function
+### Step 2.1: Define Energy Function ✅
 **File**: `ebm_model.py`
-- Design local interaction structure (4-neighbors like Ising)
-- Define learnable parameters:
-  - Biases: per-pixel bias terms
-  - Weights: pairwise interaction strengths
-- Implement energy computation: E(x; θ) = -Σ biases·x - Σ weights·x_i·x_j
+- ✅ Design local interaction structure (4-neighbors like Ising)
+- ✅ Define learnable parameters:
+  - Biases: per-pixel bias terms (3,136 parameters)
+  - Weights: pairwise interaction strengths (2 parameters: horizontal + vertical)
+- ✅ Implement energy computation: E(x; θ) = -Σ biases·x - Σ weights·x_i·x_j
+- ✅ Vectorized fast implementation (16.5x speedup)
 
-**Deliverable**: EBM class with energy function
+**Deliverable**: EBM class with energy function (3,138 total parameters)
 
-### Step 2.2: Block Structure for Sampling
+### Step 2.2: Block Structure for Sampling ✅
 **File**: `ebm_model.py` (continued)
-- Design checkerboard coloring (2-color or 4-color)
-- Map MNIST 28×28 grid to THRML nodes
-- Define independent block updates
-- Verify no within-block interactions
+- ✅ Design checkerboard coloring (2-color or 4-color)
+- ✅ Map MNIST 28×28 grid to THRML nodes
+- ✅ Define independent block updates
+- ✅ Verify no within-block interactions
+- ✅ Visualize block patterns
 
-**Deliverable**: Block structure compatible with THRML
+**Deliverable**: Block structure compatible with THRML (2-coloring: 392 pixels/block)
 
-### Step 2.3: THRML Integration
+### Step 2.3: THRML Integration ✅
 **File**: `thrml_sampler.py`
-- Convert EBM to THRML SpinNodes/CategoricalNodes
-- Create sampling program with blocks
-- Implement conditional distributions for Gibbs updates
-- Test single-step sampling
+- ✅ Convert EBM to JAX format for sampling
+- ✅ Create sampling program with blocks
+- ✅ Implement conditional distributions for Gibbs updates
+- ✅ Test single-step sampling
+- ✅ Verify energy consistency (JAX vs PyTorch < 0.00003 difference)
 
 **Deliverable**: Working THRML sampler for our EBM
 
