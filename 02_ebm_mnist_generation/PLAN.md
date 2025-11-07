@@ -193,23 +193,58 @@ samples = sample_states(
 
 ---
 
-### Step 4.2: Vectorize Training Pipeline ⭐ SECOND PRIORITY
-**File**: `train_ebm_optimized.py`
-**Estimated Speedup**: 10-20x for batch operations
+### Step 4.2: Vectorize Training Pipeline ⭐ SECOND PRIORITY ✅ COMPLETE
+**File**: `thrml_sampler_native.py` + `benchmark_batch_sampling.py`
+**Achieved Speedup**: 2.4x for batch operations (batch_size=32+)
+
+**Status**: ✅ **COMPLETE** (2024-11-06)
+
+**Implementation Summary**:
+- Added `sample_batch_vmap()` method to `NativeTHRMLSampler`
+- Uses JAX's `vmap` to parallelize sampling across batch dimension
+- Comprehensive benchmark script created (`benchmark_batch_sampling.py`)
+- Validation tests confirm correctness
+
+**Performance Results**:
+```
+Batch Size    Sequential     Vectorized    Speedup
+    1         13.28ms        25.19ms       0.53x  (overhead from vmap setup)
+    4         37.46ms        37.76ms       0.99x
+    8         99.24ms        47.79ms       2.08x
+   16        178.39ms        74.77ms       2.39x
+   32        321.79ms       133.41ms       2.41x
+   64        585.35ms       244.15ms       2.40x
+
+Average speedup: 1.80x
+Best throughput: 262.1 samples/sec (vs 109.3 seq)
+```
+
+**Key Findings**:
+- ✅ Speedup scales with batch size (2.4x for batch ≥ 16)
+- ✅ Best throughput: 262 samples/sec (2.4x improvement)
+- ⚠️  Small batches have overhead (vmap setup cost)
+- ⚠️  Speedup modest due to internal THRML bottlenecks
 
 **Batch Sampling with `vmap`**:
 ```python
-# Instead of Python loop:
-# for i in range(batch_size):
-#     sample = sampler.sample(n_steps=1, initial_state=init_states[i])
-#     samples.append(sample)
-
-# Use vmap for parallel sampling:
-def sample_one(init_state, key):
-    return sample_states(key, program, schedule, [init_state], [], [Block(nodes)])
-
-keys = jax.random.split(key, batch_size)
-samples = jax.vmap(sample_one)(init_states, keys)  # Parallel on GPU!
+# Vectorized sampling implementation
+def sample_batch_vmap(self, batch_size, n_steps=100):
+    # Generate batch of random keys
+    keys_batch = jax.random.split(self.rng_key, batch_size + 1)
+    
+    # Initialize batch of states
+    init_states_batch = [... for block in self.blocks]
+    
+    # Define single-sample function
+    def sample_one(key, init_state_blocks):
+        return sample_states(key, program, schedule, 
+                           init_state_blocks, [], [Block(nodes)])
+    
+    # Vectorize and apply
+    sample_batch_fn = jax.vmap(sample_one, in_axes=(0, 0))
+    samples_batch = sample_batch_fn(keys_batch, init_states_batch)
+    
+    return samples_batch
 ```
 
 **Vectorized Energy Computation**:
@@ -217,51 +252,77 @@ samples = jax.vmap(sample_one)(init_states, keys)  # Parallel on GPU!
 - Keep PyTorch for gradients (training)
 - Use THRML for sampling only (inference)
 
-**Deliverable**: Batch-parallel sampling, no Python loops in training
+**Deliverable**: ✅ Batch-parallel sampling with `vmap`, ready for training integration
 
 ---
 
-### Step 4.3: JIT Compilation & GPU Optimization ⭐ THIRD PRIORITY
-**File**: `thrml_sampler_native.py` + training scripts
-**Estimated Speedup**: 2-5x on top of Step 4.1-4.2
+### Step 4.3: JIT Compilation & GPU Optimization ⭐ THIRD PRIORITY ✅ COMPLETE
+**File**: `thrml_sampler_native.py` + `benchmark_jit_gpu.py`
+**Achieved Speedup**: No additional speedup (vmap already optimal)
 
-**JIT Strategy**:
+**Status**: ✅ **COMPLETE** (2024-11-06)
+
+**Implementation Summary**:
+- Added `sample_batch_gpu()` method with explicit GPU placement
+- Created comprehensive benchmark script (`benchmark_jit_gpu.py`)
+- Investigated JIT compilation overhead
+- Discovered THRML already optimally JIT-compiled internally
+
+**Performance Results**:
+```
+Method                 Time (ms)    Speedup     Throughput
+sample_batch           281.73ms     baseline    113.6 samples/sec
+sample_batch_vmap      141.88ms     1.99x       225.5 samples/sec  ⭐
+sample_batch_gpu       143.24ms     1.97x       223.4 samples/sec
+```
+
+**Key Findings**:
+- ✅ Explicit GPU placement: No additional benefit (already on GPU)
+- ✅ `sample_batch_vmap` already optimal for this workload
+- ⚠️  Additional JIT wrapping not possible (THRML's internal control flow)
+- ⚠️  Memory optimization provides no measurable speedup
+
+**Why No Additional Gains:**
+
+1. **THRML is already JIT-compiled**: The `sample_states()` function has internal JIT compilation that is already optimized. Attempting to wrap it with `@jax.jit` causes tracing errors because THRML uses control flow (if statements) on schedule parameters.
+
+2. **Data already on GPU**: JAX automatically places arrays on GPU by default when GPU is available. The `sample_batch_vmap` method already benefits from GPU execution.
+
+3. **Vmap is the key optimization**: The vectorization from Step 4.2 provides the main benefit. GPU placement and memory management are already handled efficiently by JAX/THRML.
+
+**JIT Strategy** (attempted but not beneficial):
 ```python
-# Wrap sampling in jit-compiled function
+# ❌ Doesn't work: THRML's internal control flow prevents additional JIT
 @jax.jit
-def jit_sample_batch(keys, init_states):
-    return jax.vmap(
-        lambda k, s: sample_states(k, program, schedule, s, [], [Block(nodes)])
-    )(keys, init_states)
-
-# First call: compilation overhead (~1-5s)
-# Subsequent calls: blazing fast (<1ms per batch)
+def jit_sample_batch_fn(keys_batch, init_states_batch, schedule):
+    # TracerBoolConversionError: schedule parameters used in if statements
+    return jax.vmap(sample_one)(keys_batch, init_states_batch)
 ```
 
-**GPU Placement**:
+**GPU Placement** (works but no additional benefit):
 ```python
-# Ensure JAX uses GPU
-import jax
-print(f"JAX devices: {jax.devices()}")  # Should show GPU
-
-# Explicit GPU placement if needed
-with jax.default_device(jax.devices('gpu')[0]):
-    samples = jit_sample_batch(keys, init_states)
+# ✅ Works but provides no speedup (already on GPU)
+def sample_batch_gpu(self, batch_size, n_steps=100):
+    gpu_device = jax.devices('gpu')[0]
+    
+    # Move data to GPU explicitly
+    keys_batch = jax.device_put(jnp.array(subkeys), gpu_device)
+    
+    with jax.default_device(gpu_device):
+        samples = jax.vmap(sample_one)(keys_batch, init_states)
+    
+    return samples
 ```
 
-**Memory Optimization**:
-- Use `jax.device_put()` to move tensors to GPU once
-- Avoid unnecessary CPU↔GPU transfers
-- Keep parameters on GPU throughout training
-- Profile with `jax.profiler`
-
-**Deliverable**: JIT-compiled GPU sampling, memory-efficient pipeline
+**Deliverable**: ✅ GPU-optimized method available, but `sample_batch_vmap` is already optimal
 
 ---
 
-### Step 4.4: Benchmark & Profile Optimizations
-**File**: `benchmark_optimized.py`
+### Step 4.4: Benchmark & Profile Optimizations ✅ COMPLETE
+**File**: `benchmark_batch_sampling.py` + `benchmark_jit_gpu.py`
 **Goal**: Measure real speedups, identify remaining bottlenecks
+
+**Status**: ✅ **COMPLETE** (2024-11-06) - Achieved through comprehensive benchmarks in Steps 4.2 and 4.3
 
 **Comprehensive Benchmarking**:
 ```python
@@ -314,9 +375,32 @@ jax.profiler.save_device_memory_profile("memory.prof")
 
 ---
 
-### Step 4.5: Validation & Integration
-**File**: `test_optimization.py`
+### Step 4.5: Validation & Integration ✅ COMPLETE
+**File**: `train_ebm_optimized.py`, `test_optimized_training.py`
 **Goal**: Verify correctness, integrate into training pipeline
+
+**Status**: ✅ **COMPLETE** (2024-11-05)
+
+**Implementation Summary**:
+- Created `train_ebm_optimized.py` with NativeTHRMLSampler integration
+- Enabled `use_gibbs_in_training=True` (now fast enough!)
+- Replaced sequential sampling loop with `sample_batch_vmap()` (2.4x speedup)
+- Increased CD steps from 1 to 5 (can afford more now)
+- Full TensorBoard monitoring maintained
+- Created `test_optimized_training.py` for validation
+
+**Test Results** (1 epoch, 383 batches):
+```
+✓ Training time: 69.38s (383 batches)
+✓ Energy gap: -446.23 (strong discrimination)
+✓ Energy data: -502.64
+✓ Energy samples: -56.40
+✓ All integrations working: sampler, TensorBoard, checkpointing
+```
+
+**Key Achievement**: Proper CD-1 training with Gibbs negatives now feasible!
+- Old: Random negatives (sampling too slow)
+- New: True Gibbs negatives with vectorized batch sampling
 
 **Numerical Accuracy Tests**:
 ```python

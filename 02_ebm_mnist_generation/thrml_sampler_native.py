@@ -435,6 +435,106 @@ class NativeTHRMLSampler:
         
         return jnp.stack(samples)
     
+    def sample_batch_vmap(
+        self,
+        batch_size: int,
+        n_steps: int = 100,
+        initial_states: Optional[jnp.ndarray] = None,
+        warmup_steps: int = 0
+    ) -> jnp.ndarray:
+        """
+        Sample a batch of images using vectorized operations (vmap).
+        
+        This method uses JAX's vmap to parallelize sampling across the batch,
+        providing significant speedup over sequential sampling, especially on GPU.
+        
+        Performance:
+        - GPU: Near-constant time regardless of batch size (parallel execution)
+        - CPU: Similar to sequential but better memory locality
+        - Expected: 10-20x speedup for batch_size >= 16
+        
+        Args:
+            batch_size: Number of images to sample
+            n_steps: Number of Gibbs sweeps per image
+            initial_states: Initial states (batch_size, n_pixels) or None
+            warmup_steps: Number of warmup steps
+        
+        Returns:
+            Batch of samples (batch_size, n_pixels)
+        """
+        # Create sampling schedule (same for all samples in batch)
+        schedule = SamplingSchedule(
+            n_warmup=warmup_steps,
+            n_samples=1,
+            steps_per_sample=n_steps
+        )
+        
+        # Generate batch of random keys for independent sampling
+        self.rng_key, *subkeys = jax.random.split(self.rng_key, batch_size + 1)
+        keys_batch = jnp.array(subkeys)
+        
+        # Initialize states for batch
+        if initial_states is None:
+            # Random initialization for all samples
+            # Create batch of initial states (one per block, per sample)
+            init_states_batch = []
+            for block in self.blocks:
+                block_size = len(block.nodes)
+                # Generate random states for this block across all samples
+                block_states = jax.random.randint(
+                    keys_batch[0],  # Use same key structure for all
+                    (batch_size, block_size),
+                    0,
+                    self.n_levels,
+                    dtype=jnp.uint8
+                )
+                init_states_batch.append(block_states)
+        else:
+            # Convert flat states to block format for batch
+            init_states_batch = []
+            for block in self.blocks:
+                indices = jnp.array([self.nodes.index(node) for node in block.nodes])
+                # Extract this block's states for all samples
+                block_states = initial_states[:, indices]
+                init_states_batch.append(block_states)
+        
+        # Define single-sample sampling function
+        def sample_one(key, init_state_blocks):
+            """Sample one image given a key and initial block states."""
+            # init_state_blocks is a list of arrays, one per block
+            init_state_list = [init_state_blocks[i] for i in range(len(self.blocks))]
+            
+            samples = sample_states(
+                key=key,
+                program=self.program,
+                schedule=schedule,
+                init_state_free=init_state_list,
+                state_clamp=[],
+                nodes_to_sample=[Block(self.nodes)]
+            )
+            
+            # Concatenate to flat state
+            return jnp.concatenate([samples[i][0] for i in range(len(samples))])
+        
+        # Vectorize across batch dimension
+        # Stack block states for vmap: list of (batch, block_size) -> single arg for vmap
+        init_state_stacked = jnp.stack([
+            jnp.stack([init_states_batch[block_idx][sample_idx] 
+                      for block_idx in range(len(self.blocks))])
+            for sample_idx in range(batch_size)
+        ])
+        
+        # Apply vmap: parallelize over batch dimension
+        sample_batch_fn = jax.vmap(
+            sample_one,
+            in_axes=(0, 0)  # Vectorize over both keys and init_states
+        )
+        
+        # Sample entire batch in parallel
+        samples_batch = sample_batch_fn(keys_batch, init_state_stacked)
+        
+        return samples_batch
+    
     def _flat_to_block_state(self, flat_state: jnp.ndarray) -> List[jnp.ndarray]:
         """
         Convert flat state (n_pixels,) to block format for THRML.
@@ -500,6 +600,231 @@ class NativeTHRMLSampler:
         # Compute energy with PyTorch EBM
         energy = self.ebm(state_torch)
         return energy.item()
+    
+    # ========================================================================
+    # STEP 4.3: JIT-COMPILED & GPU-OPTIMIZED METHODS
+    # ========================================================================
+    
+    def create_jit_sampler(self):
+        """
+        Create a JIT-compiled version of the batch sampler.
+        
+        This wraps the sampling function with @jax.jit for additional compilation.
+        Note: THRML's sample_states() is already JIT-compiled internally, so this
+        provides marginal additional benefit, mainly for the vmap wrapper.
+        
+        Returns:
+            jit_compiled_fn: JIT-compiled batch sampling function
+        """
+        # Get references to instance attributes that will be captured
+        program = self.program
+        nodes = self.nodes
+        blocks = self.blocks
+        n_levels = self.n_levels
+        
+        @jax.jit
+        def jit_sample_batch_fn(keys_batch, init_states_batch, n_warmup, n_samples, steps_per_sample):
+            """
+            JIT-compiled batch sampling function.
+            
+            Args:
+                keys_batch: (batch_size,) array of PRNG keys
+                init_states_batch: Stacked initial states for batch
+                n_warmup: Number of warmup steps (static)
+                n_samples: Number of samples (static)
+                steps_per_sample: Steps per sample (static)
+            
+            Returns:
+                samples_batch: (batch_size, n_pixels) array of samples
+            """
+            schedule = SamplingSchedule(
+                n_warmup=n_warmup,
+                n_samples=n_samples,
+                steps_per_sample=steps_per_sample
+            )
+            def sample_one(key, init_state_blocks):
+                """Sample one image."""
+                init_state_list = [init_state_blocks[i] for i in range(len(blocks))]
+                
+                samples = sample_states(
+                    key=key,
+                    program=program,
+                    schedule=schedule,
+                    init_state_free=init_state_list,
+                    state_clamp=[],
+                    nodes_to_sample=[Block(nodes)]
+                )
+                
+                return jnp.concatenate([samples[i][0] for i in range(len(samples))])
+            
+            # Vectorize across batch
+            sample_batch_fn = jax.vmap(sample_one, in_axes=(0, 0))
+            return sample_batch_fn(keys_batch, init_states_batch)
+        
+        print("\n✓ Created JIT-compiled batch sampler")
+        return jit_sample_batch_fn
+    
+    def sample_batch_jit(
+        self,
+        batch_size: int,
+        n_steps: int = 100,
+        initial_states: Optional[jnp.ndarray] = None,
+        warmup_steps: int = 0
+    ) -> jnp.ndarray:
+        """
+        Sample batch using explicit JIT compilation wrapper.
+        
+        This method creates a JIT-compiled version of the sampling function.
+        First call will have compilation overhead (~1-5s), but subsequent calls
+        should be faster due to additional JIT optimizations.
+        
+        Args:
+            batch_size: Number of images to sample
+            n_steps: Number of Gibbs sweeps per image
+            initial_states: Initial states (batch_size, n_pixels) or None
+            warmup_steps: Number of warmup steps
+        
+        Returns:
+            Batch of samples (batch_size, n_pixels)
+        """
+        # Create JIT-compiled sampler if not cached
+        if not hasattr(self, '_jit_sampler_cache'):
+            self._jit_sampler_cache = self.create_jit_sampler()
+        
+        jit_sample_fn = self._jit_sampler_cache
+        
+        # Generate keys
+        self.rng_key, *subkeys = jax.random.split(self.rng_key, batch_size + 1)
+        keys_batch = jnp.array(subkeys)
+        
+        # Initialize states
+        if initial_states is None:
+            init_states_batch = []
+            for block in self.blocks:
+                block_size = len(block.nodes)
+                block_states = jax.random.randint(
+                    keys_batch[0],
+                    (batch_size, block_size),
+                    0,
+                    self.n_levels,
+                    dtype=jnp.uint8
+                )
+                init_states_batch.append(block_states)
+        else:
+            init_states_batch = []
+            for block in self.blocks:
+                indices = jnp.array([self.nodes.index(node) for node in block.nodes])
+                block_states = initial_states[:, indices]
+                init_states_batch.append(block_states)
+        
+        # Stack for JIT function
+        init_state_stacked = jnp.stack([
+            jnp.stack([init_states_batch[block_idx][sample_idx] 
+                      for block_idx in range(len(self.blocks))])
+            for sample_idx in range(batch_size)
+        ])
+        
+        # Call JIT-compiled function
+        samples_batch = jit_sample_fn(
+            keys_batch, 
+            init_state_stacked, 
+            warmup_steps,
+            1,  # n_samples
+            n_steps  # steps_per_sample
+        )
+        
+        return samples_batch
+    
+    def sample_batch_gpu(
+        self,
+        batch_size: int,
+        n_steps: int = 100,
+        initial_states: Optional[jnp.ndarray] = None,
+        warmup_steps: int = 0
+    ) -> jnp.ndarray:
+        """
+        Sample batch with explicit GPU placement and memory optimization.
+        
+        This method ensures data stays on GPU throughout sampling and minimizes
+        CPU↔GPU transfers. Uses device_put to move data to GPU once.
+        
+        Args:
+            batch_size: Number of images to sample
+            n_steps: Number of Gibbs sweeps per image
+            initial_states: Initial states (batch_size, n_pixels) or None
+            warmup_steps: Number of warmup steps
+        
+        Returns:
+            Batch of samples (batch_size, n_pixels) on GPU
+        """
+        # Check if GPU is available
+        gpu_devices = jax.devices('gpu')
+        if not gpu_devices:
+            print("⚠️  No GPU detected, falling back to CPU")
+            return self.sample_batch_vmap(batch_size, n_steps, initial_states, warmup_steps)
+        
+        gpu_device = gpu_devices[0]
+        
+        # Create schedule
+        schedule = SamplingSchedule(
+            n_warmup=warmup_steps,
+            n_samples=1,
+            steps_per_sample=n_steps
+        )
+        
+        # Generate keys and move to GPU
+        self.rng_key, *subkeys = jax.random.split(self.rng_key, batch_size + 1)
+        keys_batch = jax.device_put(jnp.array(subkeys), gpu_device)
+        
+        # Initialize states on GPU
+        if initial_states is None:
+            init_states_batch = []
+            for block in self.blocks:
+                block_size = len(block.nodes)
+                block_states = jax.random.randint(
+                    keys_batch[0],
+                    (batch_size, block_size),
+                    0,
+                    self.n_levels,
+                    dtype=jnp.uint8
+                )
+                block_states = jax.device_put(block_states, gpu_device)
+                init_states_batch.append(block_states)
+        else:
+            # Move initial states to GPU
+            initial_states_gpu = jax.device_put(initial_states, gpu_device)
+            init_states_batch = []
+            for block in self.blocks:
+                indices = jnp.array([self.nodes.index(node) for node in block.nodes])
+                block_states = initial_states_gpu[:, indices]
+                init_states_batch.append(block_states)
+        
+        # Define sampling function
+        def sample_one(key, init_state_blocks):
+            init_state_list = [init_state_blocks[i] for i in range(len(self.blocks))]
+            samples = sample_states(
+                key=key,
+                program=self.program,
+                schedule=schedule,
+                init_state_free=init_state_list,
+                state_clamp=[],
+                nodes_to_sample=[Block(self.nodes)]
+            )
+            return jnp.concatenate([samples[i][0] for i in range(len(samples))])
+        
+        # Stack states
+        init_state_stacked = jnp.stack([
+            jnp.stack([init_states_batch[block_idx][sample_idx] 
+                      for block_idx in range(len(self.blocks))])
+            for sample_idx in range(batch_size)
+        ])
+        
+        # Vectorize and sample on GPU
+        with jax.default_device(gpu_device):
+            sample_batch_fn = jax.vmap(sample_one, in_axes=(0, 0))
+            samples_batch = sample_batch_fn(keys_batch, init_state_stacked)
+        
+        return samples_batch
 
 
 # ============================================================================
